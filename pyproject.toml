@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "imlmlib"
+version = "0.0.1"
+description = "Utilities for parametric modeling of interaction modalities that leverage memory"
+authors = ["jgori <juliengori@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.12"
+numpy = "^1.24.2"
+scipy = "^1.10.1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.2.2"
+bumpversion = "^0.6.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0", "setuptools>=45", "wheel", "setuptools_scm>=6.2"]
+build-backend = "poetry.core.masonry.api"
