@@ -1,5 +1,11 @@
 # imlmlib
-This imlmlib, an inference, simulation and utility library for interaction modalities that leverage memory.
+This imlmlib, an inference, simulation and utility library for interaction modalities that leverage memory. 
+
+# building/using the library
+
+1. You can download the source and use the library with poetry
+2. You can download the source and install it with pip (use -e if you want to edit)
+3. You can download the module directly from [PyPI](https://pypi.org/project/imlmlib/)
 
 ## Memory Models
 
