@@ -1,12 +1,8 @@
-import numpy
-import scipy.optimize as opti
-
 from imlmlib.exponential_forgetting import (
-    ef_get_per_participant_likelihood_log_a,
     GaussianEFPopulation,
 )
 from imlmlib.mem_utils import Schedule, experiment
-from imlmlib.mle_utils import estim_mle_one_trial
+from imlmlib.mle_utils import sample_mle
 
 REPLICATIONS = 1
 times = [
@@ -30,18 +26,11 @@ population_model = GaussianEFPopulation(
 data = experiment(population_model, schedule_one, replications=REPLICATIONS)
 
 
-def test_one_trial():
-    times = schedule_one.times
-    recall_single_trial = data[0, 0, :, 0]
-    infer_results = estim_mle_one_trial(
-        times,
-        recall_single_trial,
-        ef_get_per_participant_likelihood_log_a,
-        {"method": "SLSQP", "bounds": [(-5, -1), (0, 0.99)]},
-        (-3, 0.8),
-    )
-    return
+def test_mle():
+    REPL = 1
+    Nseq = 1
+    results, _ = sample_mle(REPL, Nseq, population_model, schedule_one)
 
 
 if __name__ == "__main__":
-    test_one_trial()
+    test_mle()

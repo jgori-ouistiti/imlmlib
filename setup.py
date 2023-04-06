@@ -8,11 +8,14 @@ package_data = \
 {'': ['*']}
 
 install_requires = \
-['numpy>=1.24.2,<2.0.0', 'scipy>=1.10.1,<2.0.0']
+['matplotlib>=3.7.1,<4.0.0',
+ 'numpy>=1.24.2,<2.0.0',
+ 'scipy>=1.10.1,<2.0.0',
+ 'tqdm>=4.65.0,<5.0.0']
 
 setup_kwargs = {
     'name': 'imlmlib',
-    'version': '0.0.1',
+    'version': '0.0.2.dev0',
     'description': 'Utilities for parametric modeling of interaction modalities that leverage memory',
     'long_description': None,
     'author': 'jgori',

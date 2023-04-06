@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 class MemoryModel:
     def __init__(self, nitems, *args, seed=None, **kwargs):
         self.nitems = nitems
+        self._original_seed = seed
         self.rng = numpy.random.default_rng(seed=seed)
 
     @abstractmethod
@@ -15,9 +16,17 @@ class MemoryModel:
     def compute_probabilities(self, time=None):
         raise NotImplementedError
 
-    @abstractmethod
+    @property
+    def seed(self):
+        if getattr(self, "_seed", None) is None:
+            return self._original_seed
+        else:
+            return self._seed
+
     def reset(self):
-        raise NotImplementedError
+        if isinstance(self.seed, numpy.random.SeedSequence):
+            self._seed = self._original_seed.spawn(1)[0]
+        return
 
     def query_item(self, item, time):
         prob = self.compute_probabilities(time=time)[item]
