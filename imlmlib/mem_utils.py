@@ -48,7 +48,8 @@ def trial(memory_model, schedule, reset=True):
     if reset:
         memory_model.reset()
     for item, time in schedule:
-        queries.append(memory_model.query_item(item, time))
+        query = memory_model.query_item(item, time)
+        queries.append(query)
         memory_model.update(item, time)
     return queries, memory_model
 
@@ -68,11 +69,23 @@ def experiment(population_model, schedule, replications=1):
     :rtype: numpy.array((replication, 2, len(schedule), population size))
     """
     data = numpy.zeros((replications, 2, len(schedule), population_model.pop_size))
-    for i in range(replications):
-        for n, memory_model in enumerate(population_model):
+
+    n = 0
+    for memory_model in population_model:
+        for i in range(replications):
             trial_data = numpy.array(trial(memory_model, schedule)[0])
             data[i, :, :, n] = trial_data.T
+        n += 1
     return data
+
+
+def serialize_experiment(data):
+    _shape = data.shape
+    data = data.reshape(_shape[0], _shape[1], -1, order="F")  # careful for the order
+    k_vector = []
+    for i in range(_shape[3]):
+        k_vector += [k for k in range(-1, _shape[2] - 1)]
+    return data, k_vector
 
 
 class Schedule:

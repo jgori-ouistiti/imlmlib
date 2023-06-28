@@ -5,6 +5,10 @@ import numpy
 
 
 from imlmlib.mem_utils import MemoryModel
+import seaborn
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import pandas
 
 my_diff = lambda schedule: numpy.diff([s[1] for s in schedule])
 
@@ -57,6 +61,7 @@ def ef_dq0_beta_sample(alpha, beta, k, deltat):
 
 
 # test with sympy
+
 
 # q1
 def __sym_ef_dq1_dalpha_sample(a, b, k, d):
@@ -171,18 +176,24 @@ def __sym_ef_ddq0_dbeta_dbeta_sample(a, b, k, d):
 
 
 def ef_ddq1_dalpha_dalpha_sample(alpha, beta, k, deltat):
+    # return __sym_ef_ddq1_dalpha_dalpha_sample(alpha, beta, k, deltat)
     return 0
 
 
 def ef_ddq1_dalpha_dbeta_sample(alpha, beta, k, deltat):
+    # return __sym_ef_ddq1_dalpha_dbeta_sample(alpha, beta, k, deltat)
     return k * (1 - beta) ** (k - 1) * deltat
 
 
 def ef_ddq1_dbeta_dbeta_sample(alpha, beta, k, deltat):
+    # return __sym_ef_ddq1_dbeta_dbeta_sample(alpha, beta, k, deltat)
     return -alpha * k * (k - 1) * (1 - beta) ** (k - 2) * deltat
 
 
 def ef_ddq0_dalpha_dalpha_sample(alpha, beta, k, deltat):
+    # return __sym_ef_ddq0_dalpha_dalpha_sample(alpha, beta, k, deltat)
+    if deltat == numpy.inf:
+        return 0
     with numpy.errstate(divide="raise"):
         try:
             return (
@@ -198,7 +209,10 @@ def ef_ddq0_dalpha_dalpha_sample(alpha, beta, k, deltat):
 
 
 def ef_ddq0_dalpha_dbeta_sample(alpha, beta, k, deltat):
-    with numpy.errstate(divide="raise"):
+    # return __sym_ef_ddq0_dalpha_dbeta_sample(alpha, beta, k, deltat)
+    if deltat == numpy.inf:
+        return 0
+    with numpy.errstate(divide="raise", invalid="raise"):
         try:
             return (
                 -k
@@ -218,7 +232,10 @@ def ef_ddq0_dalpha_dbeta_sample(alpha, beta, k, deltat):
 
 
 def ef_ddq0_dbeta_dbeta_sample(alpha, beta, k, deltat):
-    with numpy.errstate(divide="raise"):
+    # return __sym_ef_ddq0_dbeta_dbeta_sample(alpha, beta, k, deltat)
+    if deltat == numpy.inf:
+        return 0
+    with numpy.errstate(divide="raise", invalid="raise"):
         try:
             return (
                 alpha
@@ -240,38 +257,83 @@ def ef_ddq0_dbeta_dbeta_sample(alpha, beta, k, deltat):
 
 
 def ef_log_likelihood_sample(recall, k, deltat, alpha, beta, transform):
-
     # rescaling value to linear
     a, b = transform(alpha, beta)
-
     if recall == 1:  # Warning: passing to array converts recall to float
         return -a * (1 - b) ** k * deltat
     elif recall == 0:
-        with numpy.errstate(over="raise"):
+        with numpy.errstate(over="raise", invalid="raise"):
             try:
                 exp = numpy.exp(-a * (1 - b) ** k * deltat)
-                exp = numpy.clip(exp, a_min=0, a_max=1 - 1e-4)
+
+                # exp = numpy.clip(exp, a_min=0, a_max=1 - 1e-4)
                 return numpy.log(1 - exp)
             except FloatingPointError:
                 return -1e6
+
     else:
         raise ValueError(f"Recall is not 0 or 1, but is {recall}")
 
 
+# Old version, with recalls[:1]
+#
+# def ef_get_per_participant_likelihood_transform(
+#     theta, deltas, recalls, transform, k_vector=None
+# ):
+#     ll = 0
+#     alpha, beta = theta
+
+#     if k_vector is None:
+#         for nsched, recall in enumerate(recalls[1:]):
+#             ll += ef_log_likelihood_sample(
+#                 recall, nsched, deltas[nsched], alpha, beta, transform
+#             )
+#     else:
+#         for n, (k, recall) in enumerate(zip(k_vector, recalls)):
+#             ll += ef_log_likelihood_sample(recall, k, deltas[n], alpha, beta, transform)
+#     return ll
+
+
 def ef_get_per_participant_likelihood_transform(
-    theta, deltas, recalls, transform, k_vector=None
+    theta,
+    deltas,
+    recalls,
+    k_vector=None,
+    transform=None,
 ):
+    """ef_get_per_participant_likelihood_transform
+
+    .. warning::
+
+        if k_vector is None, then it is expected that you give the first trial as well ie the first one where recall is impossible.
+
+    :param theta: _description_
+    :type theta: _type_
+    :param deltas: _description_
+    :type deltas: _type_
+    :param recalls: _description_
+    :type recalls: _type_
+    :param transform: _description_, defaults to None
+    :type transform: _type_, optional
+    :param k_vector: _description_, defaults to None
+    :type k_vector: _type_, optional
+    :return: _description_
+    :rtype: _type_
+    """
     ll = 0
     alpha, beta = theta
-
+    if transform is None:
+        transform = lambda a, b: (a, b)
     if k_vector is None:
-        for nsched, recall in enumerate(recalls[1:]):
-            ll += ef_log_likelihood_sample(
+        for nsched, recall in enumerate(recalls):
+            dll = ef_log_likelihood_sample(
                 recall, nsched, deltas[nsched], alpha, beta, transform
             )
+            ll += dll
     else:
         for n, (k, recall) in enumerate(zip(k_vector, recalls)):
-            ll += ef_log_likelihood_sample(recall, k, deltas[n], alpha, beta, transform)
+            dll = ef_log_likelihood_sample(recall, k, deltas[n], alpha, beta, transform)
+            ll += dll
     return ll
 
 
@@ -281,26 +343,33 @@ class ExponentialForgetting(MemoryModel):
         self.a, self.b = a, b
         self.reset()
 
-    def reset(self, a=None, b=None):
+    def reset(self, *args, a=None, b=None):
         super().reset()
         if a is not None:
             self.a = a
         if b is not None:
             self.b = b
 
-        self.counters = numpy.zeros((self.nitems, 2))
-        self.counters[:, 1] = -numpy.inf
+        if len(args) == 0:
+            self.counters = numpy.zeros((self.nitems, 2))
+            self.counters[:, 1] = -numpy.inf
+        else:
+            self.counters = numpy.zeros((self.n_items, 2))
+            self.counters[:, 0] = args[0]
+            self.counters[:, 1] = args[1]
 
-    def update(self, item, time):
+    def update(self, item, time, N=None):
         item = int(item)
-        self.counters[item, 0] += 1
+        if N is None:
+            self.counters[item, 0] += 1
+        else:
+            self.counters[item, 0] = N
         self.counters[item, 1] = time
 
     def _print_info(self):
         print(f"counters: \t {self.counters}")
 
     def compute_probabilities(self, time=None):
-
         if time is None:
             time = numpy.max(self.counters[:, 1])
         n = self.counters[:, 0]
@@ -349,7 +418,7 @@ class GaussianEFPopulation:
         self.n_items = n_items
         self.args = args
         self.kwargs = kwargs
-        self.rng = numpy.random.default_rng(seed=seed)
+        self.rng = numpy.random.default_rng(seed=self.seed)
 
         self.mu_a = mu_a
         self.mu_b = mu_b
@@ -361,10 +430,16 @@ class GaussianEFPopulation:
         return self
 
     def __next__(self):
-        while self.counter < self.pop_size:
+        if self.counter < self.pop_size:
             self.counter += 1
-            a = self.rng.normal(self.mu_a, self.sigma_a)
-            b = self.rng.normal(self.mu_b, self.sigma_b)
+            if self.sigma_a is not None:
+                a = self.rng.normal(self.mu_a, self.sigma_a)
+            else:
+                a = self.mu_a
+            if self.sigma_b is not None:
+                b = self.rng.normal(self.mu_b, self.sigma_b)
+            else:
+                b = self.mu_b
 
             return ExponentialForgetting(
                 self.n_items,
@@ -379,9 +454,197 @@ class GaussianEFPopulation:
     def __repr__(self):
         _str = "Exponential forgetting\n"
         _str += f"pop. size = {self.pop_size}\n"
-        _str += f"a ~ Gaussian({self.mu_a:.3e}, {self.sigma_a**2:.3e}) \n"
-        _str += f"b ~ Gaussian({self.mu_b:.3e}, {self.sigma_b**2:.3e}) \n"
+        if self.sigma_a is not None:
+            _str += f"a ~ Gaussian({self.mu_a:.3e}, {self.sigma_a**2:.3e}) \n"
+        else:
+            _str += f"a ~ Gaussian({self.mu_a:.3e}, 0) \n"
+        if self.sigma_b is not None:
+            _str += f"b ~ Gaussian({self.mu_b:.3e}, {self.sigma_b**2:.3e}) \n"
+        else:
+            _str += f"b ~ Gaussian({self.mu_b:.3e}, 0) \n"
         return _str
+
+
+#### ============================= Plot
+
+from seaborn.regression import _RegressionPlotter
+
+### Patching the binned regression results from seaborn to access to the binned scatterplot data (if needed).
+
+
+class _PatchedRegressionPlotter(_RegressionPlotter):
+    def scatterplot(self, ax, kws):
+        """Draw the data."""
+        # Treat the line-based markers specially, explicitly setting larger
+        # linewidth than is provided by the seaborn style defaults.
+        # This would ideally be handled better in matplotlib (i.e., distinguish
+        # between edgewidth for solid glyphs and linewidth for line glyphs
+        # but this should do for now.
+        line_markers = ["1", "2", "3", "4", "+", "x", "|", "_"]
+        if self.x_estimator is None:
+            if "marker" in kws and kws["marker"] in line_markers:
+                lw = mpl.rcParams["lines.linewidth"]
+            else:
+                lw = mpl.rcParams["lines.markeredgewidth"]
+            kws.setdefault("linewidths", lw)
+
+            if not hasattr(kws["color"], "shape") or kws["color"].shape[1] < 4:
+                kws.setdefault("alpha", 0.8)
+
+            x, y = self.scatter_data
+            ax.scatter(x, y, **kws)
+        else:
+            # TODO abstraction
+            ci_kws = {"color": kws["color"]}
+            if "alpha" in kws:
+                ci_kws["alpha"] = kws["alpha"]
+            ci_kws["linewidth"] = mpl.rcParams["lines.linewidth"] * 1.75
+            kws.setdefault("s", 50)
+
+            xs, ys, cis = self.estimate_data
+            if [ci for ci in cis if ci is not None]:
+                for x, ci in zip(xs, cis):
+                    ax.plot([x, x], ci, **ci_kws)
+            ax.scatter(xs, ys, **kws)
+            self.xs = xs
+            self.ys = ys
+            self.cis = cis
+
+
+def regplot(
+    data=None,
+    *,
+    x=None,
+    y=None,
+    x_estimator=None,
+    x_bins=None,
+    x_ci="ci",
+    scatter=True,
+    fit_reg=True,
+    ci=95,
+    n_boot=1000,
+    units=None,
+    seed=None,
+    order=1,
+    logistic=False,
+    lowess=False,
+    robust=False,
+    logx=False,
+    x_partial=None,
+    y_partial=None,
+    truncate=True,
+    dropna=True,
+    x_jitter=None,
+    y_jitter=None,
+    label=None,
+    color=None,
+    marker="o",
+    scatter_kws=None,
+    line_kws=None,
+    ax=None,
+):
+    """
+    # regplot.xs, regplot.ys, regplot.cis --> summary data
+
+    """
+    plotter = _PatchedRegressionPlotter(
+        x,
+        y,
+        data,
+        x_estimator,
+        x_bins,
+        x_ci,
+        scatter,
+        fit_reg,
+        ci,
+        n_boot,
+        units,
+        seed,
+        order,
+        logistic,
+        lowess,
+        robust,
+        logx,
+        x_partial,
+        y_partial,
+        truncate,
+        dropna,
+        x_jitter,
+        y_jitter,
+        color,
+        label,
+    )
+
+    if ax is None:
+        ax = plt.gca()
+
+    scatter_kws = {} if scatter_kws is None else copy.copy(scatter_kws)
+    scatter_kws["marker"] = marker
+    line_kws = {} if line_kws is None else copy.copy(line_kws)
+    plotter.plot(ax, scatter_kws, line_kws)
+    return ax, plotter
+
+
+def plot_exponent_scatter(exponent, recall, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(nrows=1, ncols=1)
+
+    _, _regplot = regplot(
+        x=exponent,
+        y=recall,
+        ax=ax,
+        fit_reg=False,
+        x_bins=40,
+        label="Estimated recall probability",
+    )
+    _, _ = regplot(
+        x=exponent, y=recall, ax=ax, fit_reg=False, label="Recall events", marker="."
+    )
+    _x = numpy.linspace(numpy.min(exponent), numpy.max(exponent), 100)
+    ax.plot(_x, [numpy.exp(x) for x in _x], "-", label="exponential forgetting model")
+    ax.set_xlabel(r"$\mathrm{exponent~}\omega$")
+    ax.set_ylabel("Recall (events and probabilities)")
+    return ax, _regplot
+
+
+def loglogpplot(k_repetition, recall, deltas):
+    sequence = [(k, r, d) for k, r, d in zip(k_repetition, recall, deltas)]
+    df = pandas.DataFrame(sequence)
+    df.columns = ["repetition", "recall", "deltat"]
+    df = df[df["repetition"] >= 0]
+    df["discretized_deltas"] = pandas.cut(df["deltat"], bins=15, labels=False)
+    df_group = df.groupby(["repetition", "discretized_deltas"]).mean()
+    df_group["log_delta"] = numpy.log(df_group["deltat"])
+    df_group = df_group[df_group["recall"] != 0]
+    df_group["minuslogp"] = -numpy.log(df_group["recall"])
+    df_group = df_group[df_group["minuslogp"] != 0]
+    df_group["logminuslogp"] = numpy.log(df_group["minuslogp"])
+
+    fg = seaborn.lmplot(
+        x="log_delta",
+        y="logminuslogp",
+        data=df_group.reset_index(),
+        hue="repetition",
+    )
+    ax = fg.axes.flatten()[0]
+    xlim = ax.get_xlim()
+    ax.plot(xlim, xlim, "r-", lw=2, label="y=x")
+    ax.text(numpy.mean(xlim) + 0.2, numpy.mean(xlim) - 0.2, "y=x", color="r")
+    fg.set_xlabels(r"$\log(\Delta_t)$")
+    fg.set_ylabels(r"$\log(-\log p)$")
+    return fg, ax
+
+
+def diagnostics(alpha, beta, k_repetition, deltas, recall):
+    exponent = [
+        -alpha * (1 - beta) ** (k) * dt for (k, dt) in zip(k_repetition, deltas)
+    ]
+    fig, axs = plt.subplots(nrows=1, ncols=1)
+    ax, regplot = plot_exponent_scatter(exponent, recall, ax=axs)
+    ax.legend()
+    fg, ax = loglogpplot(k_repetition, recall, deltas)
+
+    return fig, (fg, ax)
 
 
 if __name__ == "__main__":
@@ -406,41 +669,68 @@ if __name__ == "__main__":
     # q1
     res = __sym_ef_dq1_dalpha_sample(a, b, k, deltat)
     res_bis = ef_dq1_dalpha_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_dq1_dbeta_sample(a, b, k, deltat)
     res_bis = ef_dq1_dbeta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq1_dalpha_dalpha_sample(a, b, k, deltat)
     res_bis = ef_ddq1_dalpha_dalpha_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq1_dalpha_dbeta_sample(a, b, k, deltat)
     res_bis = ef_ddq1_dalpha_dbeta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq1_dbeta_dbeta_sample(a, b, k, deltat)
     res_bis = ef_ddq1_dbeta_dbeta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     # q0
     res = __sym_ef_dq0_dalpha_sample(a, b, k, deltat)
     res_bis = ef_dq0_alpha_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_dq0_dbeta_sample(a, b, k, deltat)
     res_bis = ef_dq0_beta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq0_dalpha_dalpha_sample(a, b, k, deltat)
     res_bis = ef_ddq0_dalpha_dalpha_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq0_dalpha_dbeta_sample(a, b, k, deltat)
     res_bis = ef_ddq0_dalpha_dbeta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
 
     res = __sym_ef_ddq0_dbeta_dbeta_sample(a, b, k, deltat)
     res_bis = ef_ddq0_dbeta_dbeta_sample(a, b, k, deltat)
-    print(res, res_bis)
+    assert numpy.abs(res - res_bis) < 1e-6
+
+    ###################
+    times = [
+        0,
+        100,
+        200,
+        300,
+        2000,
+        2200,
+        2400,
+        4000,
+        4100,
+        4200,
+        8000,
+        10000,
+    ]  # small schedule
+    items = [0 for i in times]  # only one item
+    ef = ExponentialForgetting(1, a=a, b=b)
+    ef.reset()
+    print(ef.counters)
+    for n, (item, time) in enumerate(zip(items, times)):
+        print("=====")
+        print(n)
+        ef.query_item(item, time)
+        ef.update(item, time)
+        print(ef.counters)
+        # print(ef.compute_probabilities())
