@@ -226,6 +226,32 @@ def test_duplicate():
     print(inference_results)
 
 
+def test_logminuslogp():
+    SEED = 999
+    N = 100000
+
+    alpha = 0.001
+    beta = 0.4
+
+    ef = EF.ExponentialForgetting(1, a=alpha, b=beta, seed=SEED)
+    rng = numpy.random.default_rng(seed=SEED)
+
+    def simulate_arbitrary_traj(ef, k_vector, deltas):
+        recall = []
+        for k, d in zip(k_vector, deltas):
+            ef.update(0, 0, N=k)
+            recall.append(ef.query_item(0, d))
+        return recall
+
+    k_vector = rng.integers(low=0, high=10, size=N)
+    deltas = rng.integers(low=0, high=5000, size=N)
+    recall_probs = simulate_arbitrary_traj(ef, k_vector, deltas)
+    recall = [rp[0] for rp in recall_probs]
+
+    k_repetition = [k - 1 for k in k_vector]
+    fg, ax, estim = EF.loglogpplot(k_repetition, recall, deltas)
+
+
 if __name__ == "__main__":
     test_EF_sample()
     test_EF_notransform()
@@ -236,3 +262,4 @@ if __name__ == "__main__":
     test_efll_without_first()
     test_duplicate()
     test_rng_pop()
+    test_logminuslogp()

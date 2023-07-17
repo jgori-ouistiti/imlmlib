@@ -1,6 +1,6 @@
-import warnings
-
-warnings.filterwarnings("error")
+# import warnings
+# warnings.filterwarnings("error")
+# https://stackoverflow.com/questions/63979540/python-how-to-filter-specific-warning  --> see this link for filtering
 import numpy
 
 
@@ -9,6 +9,9 @@ import seaborn
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
 
 my_diff = lambda schedule: numpy.diff([s[1] for s in schedule])
 
@@ -388,9 +391,8 @@ class GaussianEFPopulation:
 
     def __init__(
         self,
-        pop_size,
-        n_items,
-        *args,
+        population_size=1,
+        n_items=1,
         seed=None,
         mu_a=1e-2,
         sigma_a=1e-2 / 6,
@@ -413,10 +415,9 @@ class GaussianEFPopulation:
         :param sigma_b: standard deviation of the b parameter, defaults to 0.5/6
         :type sigma_b: float, optional
         """
-        self.pop_size = pop_size
+        self.pop_size = population_size
         self.seed = numpy.random.SeedSequence(seed)
         self.n_items = n_items
-        self.args = args
         self.kwargs = kwargs
         self.rng = numpy.random.default_rng(seed=self.seed)
 
@@ -443,7 +444,6 @@ class GaussianEFPopulation:
 
             return ExponentialForgetting(
                 self.n_items,
-                *self.args,
                 **self.kwargs,
                 seed=self.seed.spawn(1)[0],
                 a=a,
@@ -620,6 +620,16 @@ def loglogpplot(k_repetition, recall, deltas):
     df_group = df_group[df_group["minuslogp"] != 0]
     df_group["logminuslogp"] = numpy.log(df_group["minuslogp"])
 
+    df_group = df_group.reset_index()
+    model = smf.mixedlm(
+        "logminuslogp ~ log_delta", df_group, groups=df_group["repetition"]
+    )
+    _fit = model.fit()
+    ri = [v[0] for v in _fit.random_effects.values()]
+    beta_estim = 1 - numpy.exp(numpy.mean(numpy.diff(ri)))
+    alpha_estim = numpy.exp(_fit.params["Intercept"] + ri[0])
+    estim = {"alpha_estim": alpha_estim, "beta_estim": beta_estim}
+
     fg = seaborn.lmplot(
         x="log_delta",
         y="logminuslogp",
@@ -632,7 +642,7 @@ def loglogpplot(k_repetition, recall, deltas):
     ax.text(numpy.mean(xlim) + 0.2, numpy.mean(xlim) - 0.2, "y=x", color="r")
     fg.set_xlabels(r"$\log(\Delta_t)$")
     fg.set_ylabels(r"$\log(-\log p)$")
-    return fg, ax
+    return fg, ax, estim
 
 
 def diagnostics(alpha, beta, k_repetition, deltas, recall):
@@ -642,9 +652,9 @@ def diagnostics(alpha, beta, k_repetition, deltas, recall):
     fig, axs = plt.subplots(nrows=1, ncols=1)
     ax, regplot = plot_exponent_scatter(exponent, recall, ax=axs)
     ax.legend()
-    fg, ax = loglogpplot(k_repetition, recall, deltas)
+    fg, ax, estim = loglogpplot(k_repetition, recall, deltas)
 
-    return fig, (fg, ax)
+    return fig, (fg, ax, estim)
 
 
 if __name__ == "__main__":

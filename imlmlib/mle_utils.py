@@ -2,8 +2,8 @@ import numpy
 import scipy
 import scipy.optimize as opti
 import functools
+import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
-import matplotlib.transforms as transforms
 from tqdm import tqdm
 from itertools import chain
 
@@ -19,48 +19,14 @@ from imlmlib.exponential_forgetting import (
 )
 
 
-class ConfidenceEllipsisNotDefinedError(Exception):
-    """ConfidenceEllipsisNotDefinedError
+# class ConfidenceEllipsisNotDefinedError(Exception):
+#     """ConfidenceEllipsisNotDefinedError
 
-    Raised when the estimated covariance matrix is singular
-    """
+#     Raised when the estimated covariance matrix is singular
+#     """
 
-    pass
+#     pass
 
-
-def grid_ll(likelihood, schedule, xp_data, discretize, verbose=False):
-    """grid_ll _summary_
-
-    import matplotlib.pyplot as plt
-
-    discretize = (40, 10)
-    res = grid_ll(ef_get_global_likelihood, schedule_one, data, discretize)
-    ll = numpy.clip(res[:, 2], max(res[:, 2]) * 2, max(res[:, 2])).reshape(*discretize)
-    maxll = res[numpy.argmax(ll), :2]
-    plt.imshow(ll)
-    plt.plot(maxll[1] * 10, 29, "rD")
-    plt.plot(0.5 * 10, (-2 + 5) * 10)
-    plt.show()
-    exit()
-    """
-    # invert sign and deal with argument shape
-    ll_lambda = lambda guess, args: -likelihood(guess, *args)
-
-    data = xp_data[0]
-
-    grid = numpy.dstack(
-        numpy.meshgrid(
-            numpy.linspace(-5, -1, discretize[0]),
-            numpy.linspace(0, 0.99, discretize[1]),
-        )
-    ).reshape(-1, 2)
-
-    ll = numpy.zeros((grid.shape[0], 3))
-    for i, theta in enumerate(grid):
-        ll[i, :2] = theta
-        ll[i, 2] = -ll_lambda(theta, [data, schedule])
-
-    return ll
 
 
 def estim_mle_one_trial(
@@ -82,60 +48,46 @@ def estim_mle_one_trial(
 numpy.seterr(divide="raise")
 
 
-def confidence_ellipse(x, y, cov, ax, n_std=3.0, facecolor="none", **kwargs):
-    """straightforward adaptation from :
-    https://matplotlib.org/stable/gallery/statistics/confidence_ellipse.html
+def _confidence_ellipsis(x, cov, critical_value = 5.991, **kwargs):
+    # critical values can be looked up in a chisquared table with df = 2
 
-    Create a plot of the covariance confidence ellipse of *x* and *y*.
+    eigen_values, eigen_vectors = numpy.linalg.eig(cov)
+    indexes = eigen_values.argsort()[::-1]
+    eigen_values = eigen_values[indexes]
+    eigen_vectors = eigen_vectors[:,indexes]
 
-    Parameters
-    ----------
-    cov : array-like, shape (n, n)
-        Input data.
+    ellipsis_orientation = numpy.arctan2(eigen_vectors[:,0][1], eigen_vectors[:,0][0])
+    
+    ellipsis_large_axis = 2*numpy.sqrt(critical_value*eigen_values[0])
+    ellipsis_small_axis = 2*numpy.sqrt(critical_value*eigen_values[1])
+    return Ellipse(x, ellipsis_large_axis, ellipsis_small_axis, ellipsis_orientation, **kwargs)
 
-    ax : matplotlib.axes.Axes
-        The axes object to draw the ellipse into.
 
-    n_std : float
-        The number of standard deviations to determine the ellipse's radiuses.
+def confidence_ellipse(inferred_parameters, estimated_covariance_matrix,  alpha_scale = 'log', confidence_levels = [.68, .95], plot = False, ax = None, colors = ['#B0E0E6', '#87CEEB'], CI95 = False, plot_kwargs = {'color': 'red', 'marker': 'D', 'label' : 'MLE'}):
+    """estimated_covariance_matrix = numpy.linalg.inv(J)"""
+    
 
-    **kwargs
-        Forwarded to `~matplotlib.patches.Ellipse`
+    x = inferred_parameters
+    if alpha_scale == 'log':
+        estimated_covariance_matrix, CI_log_alpha, CI_beta = delta_method_log_CI(*x, estimated_covariance_matrix)
+        x = (numpy.log10(x[0]), x[1])
 
-    Returns
-    -------
-    matplotlib.patches.Ellipse
-    """
-    try:
-        pearson = cov[0, 1] / numpy.sqrt(cov[0, 0] * cov[1, 1])
-    except FloatingPointError:
-        raise ConfidenceEllipsisNotDefinedError
-    # Using a special case to obtain the eigenvalues of this
-    # two-dimensional dataset.
-    ell_radius_x = numpy.sqrt(1 + pearson)
-    ell_radius_y = numpy.sqrt(1 - pearson)
-    ellipse = Ellipse(
-        (0, 0),
-        width=ell_radius_x * 2,
-        height=ell_radius_y * 2,
-        facecolor=facecolor,
-        **kwargs,
-    )
+    if plot is False:
+        return CI_log_alpha, CI_beta
+    if ax is None:
+        fig, ax = plt.subplots(nrows = 1, ncols = 1)
+    critical_values = [scipy.stats.chi2.ppf(cl, 2) for cl in confidence_levels]
+    for critical_value, color, cl in zip(critical_values[::-1], colors[::-1], confidence_levels[::-1]):
+        ax.add_patch(_confidence_ellipsis(x, estimated_covariance_matrix, critical_value, fill = True, facecolor = color, edgecolor= 'b', label = f'Confidence level:{cl}'))
 
-    # Calculating the standard deviation of x from
-    # the squareroot of the variance and multiplying
-    # with the given number of standard deviations.
-    scale_x = numpy.sqrt(cov[0, 0]) * n_std
+    ax.plot(*x, **plot_kwargs)
+        
 
-    # calculating the standard deviation of y ...
-    scale_y = numpy.sqrt(cov[1, 1]) * n_std
+    if CI95:
+        return ax, CI_log_alpha, CI_beta
+    else:
+        return ax
 
-    transf = (
-        transforms.Affine2D().rotate_deg(45).scale(scale_x, scale_y).translate(x, y)
-    )
-
-    ellipse.set_transform(transf + ax.transData)
-    return ax.add_patch(ellipse)
 
 
 def identify_alpha_beta_from_recall_sequence(
@@ -145,10 +97,7 @@ def identify_alpha_beta_from_recall_sequence(
     optim_kwargs={"method": "L-BFGS-B", "bounds": [(1e-7, 5e-1), (0, 0.99)]},
     verbose=True,
     k_vector=None,
-    CI=False,
 ):
-    # for r, d, k in zip(recall_sequence, deltas, k_vector):
-    #     print(r, d, k)
 
     infer_results = estim_mle_one_trial(
         deltas,
@@ -162,45 +111,8 @@ def identify_alpha_beta_from_recall_sequence(
     if verbose:
         print(infer_results)
 
-    if CI:
-        J, CI_alpha, CI_beta = get_confidence_single(
-            recall_sequence, deltas, *infer_results.x, verbose=verbose
-        )
-
-        return infer_results, J, CI_alpha, CI_beta
     return infer_results
 
-
-def sample_mle(REPL, Nseq, population_model, schedule):
-    data = experiment(population_model, schedule, replications=REPL * Nseq)
-    results = numpy.zeros((8, REPL))
-    for r in tqdm(range(REPL)):
-        recall_sequence = data[r * Nseq : (r + 1) * Nseq, 0, :, 0]
-        recall = recall_sequence[:, 1:].ravel(order="C")
-        k_vector = list(
-            chain(*[list(range(recall_sequence.shape[1] - 1)) for u in range(Nseq)])
-        )
-        deltas = list(chain(*[numpy.diff(schedule.times) for u in range(Nseq)]))
-        optim_kwargs = {"method": "L-BFGS-B", "bounds": [(1e-5, 1e-1), (0, 0.99)]}
-        verbose = False
-        guess = (1e-3, 0.5)
-        (
-            inference_results,
-            I,
-            CI_alpha,
-            CI_beta,
-        ) = identify_alpha_beta_from_recall_sequence(
-            recall,
-            deltas,
-            optim_kwargs=optim_kwargs,
-            verbose=verbose,
-            guess=guess,
-            k_vector=k_vector,
-        )
-        results[:6, r] = *inference_results.x, *CI_alpha, *CI_beta
-        new_I, CI_alpha, CI_beta = delta_method_log_CI(*inference_results.x, I)
-        results[6:, r] = (*CI_alpha,)
-    return results, new_I
 
 
 def ef_get_sequence_observed_information_matrix(
@@ -228,7 +140,10 @@ def ef_get_sequence_observed_information_matrix(
     J_22 = 0
     if k_vector is None:
         k_vector = list(range(1, len(deltas)))
+
+    # print(recall_sequence, deltas, k_vector)
     for recall, delta, k in zip(recall_sequence, deltas, k_vector):
+        # print(recall, delta, k)
         if recall == 1:
             J_11 += ef_ddq1_dalpha_dalpha_sample(alpha, beta, k, delta)
             J_12 += ef_ddq1_dalpha_dbeta_sample(alpha, beta, k, delta)
@@ -245,11 +160,12 @@ def ef_get_sequence_observed_information_matrix(
 
 
 def delta_method_log_CI(alpha, beta, var):
+    """var should be inverse of J observed information matrix
+    """
     grad = numpy.array([[1 / alpha / numpy.log(10), 0], [0, 1]])
-
     new_var = grad.T @ var @ grad
     CI_alpha_low, CI_alpha_high, CI_beta_low, CI_beta_high = _CI_asymptotical(
-        numpy.log10(alpha), beta, new_var
+        numpy.log10(alpha), beta, new_var[0,0], new_var[1,1]
     )
 
     return new_var, (CI_alpha_low, CI_alpha_high), (CI_beta_low, CI_beta_high)
@@ -274,12 +190,16 @@ def _CI_asymptotical(alpha, beta, inv_J_00, inv_J_11, critical_value=1.96):
     return CI_alpha_low, CI_alpha_high, CI_beta_low, CI_beta_high
 
 
-def get_confidence_single(
-    recall_sequence, deltas, alpha, beta, level=0.05, verbose=True
-):
+def observed_information_matrix(recall_sequence, deltas, alpha, beta, k_vector=None):
     J, n = ef_get_sequence_observed_information_matrix(
-        recall_sequence, deltas, alpha, beta
+        recall_sequence, deltas, alpha, beta, k_vector=k_vector
     )
+    return J
+
+def get_confidence_single(
+    J, level=0.05, verbose=True
+):
+    
 
     inv_J = numpy.linalg.inv(J)
 
@@ -291,9 +211,10 @@ def get_confidence_single(
 
     if verbose:
         print(f"N observations: {n}")
-        print(f"Observed Information Matrix: {I}")
+        print(f"Observed Information Matrix: {inv_J}")
         print("Asymptotic confidence intervals (only valid for large N)")
         print(f"alpha: [{CI_alpha_low:.3e}, {CI_alpha_high:.3e}]")
         print(f"beta: [{CI_beta_low:.3e}, {CI_beta_high:.3e}]")
 
     return J, (CI_alpha_low, CI_alpha_high), (CI_beta_low, CI_beta_high)
+

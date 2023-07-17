@@ -120,7 +120,7 @@ class Schedule:
 
     def __next__(self):
         if self.counter < self.max:
-            ret_value = (self.items[self.counter], self.times[self.counter])
+            ret_value = self[self.counter]
             self.counter += 1
             return ret_value
         else:
@@ -129,6 +129,54 @@ class Schedule:
     def __repr__(self):
         return f"items: {self.items}\ntimes: {self.times}"
 
+
+class BlockBasedSchedule(Schedule):
+    def __init__(self, nitems, intertrial_time, interblock_time, repet_trials=2, seed = None, sigma_t = None):
+
+        self.seed = seed
+        self.rng = numpy.random.default_rng(self.seed)
+        self.sigma_t = sigma_t
+
+        self.nitems = nitems
+        self.intertrial_time = intertrial_time
+        self.interblock_time = interblock_time
+        self.repet_trials = repet_trials if repet_trials is not None else 1
+
+        self.items, self.times, self.blocks = self.regen_schedule()
+        self.max = numpy.array(self.times).squeeze().shape[0]
+        
+
+    def regen_schedule(
+        self, intertrial_time=None, interblock_time=None, repet_trials=None
+    ):
+        self.intertrial_time = (
+            self.intertrial_time if intertrial_time is None else intertrial_time
+        )
+        self.interblock_time = (
+            self.interblock_time if interblock_time is None else interblock_time
+        )
+        self.repet_trials = self.repet_trials if repet_trials is None else repet_trials
+
+        items = []
+        times = []
+        blocks = []
+        t = 0
+        for nb, ibt in enumerate((self.interblock_time + [0])):
+            for r in range(self.repet_trials):
+                if self.sigma_t is not None:
+                    _rdm = self.rng.lognormal(sigma = self.sigma_t, size = (self.nitems,))
+                else:
+                    _rdm = numpy.zeros((self.nitems,))
+                for i,r in zip(range(self.nitems), _rdm):
+                    items.append(i)
+                    times.append(t)
+                    
+                    t += self.intertrial_time + r
+                    blocks.append(nb)
+            t += ibt
+
+        return items, times, blocks
+    
 
 class Player:
     def __init__(self, schedule, memory_model):
